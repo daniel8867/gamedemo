@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Overdrive: Dash Edition</title>
+    <style>
+        :root {
+            --neon-blue: #00f3ff;
+            --neon-pink: #ff00ff;
+            --neon-green: #2ecc71;
+            --bg-dark: #0a0a0c;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: white;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #game-wrapper {
+            position: relative;
+            padding: 20px;
+        }
+
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 300px;
+            background: #111;
+            border: 3px solid #333;
+            border-radius: 12px;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.5), inset 0 0 50px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            outline: none;
+        }
+
+        #player {
+            position: absolute;
+            width: 32px;
+            height: 32px;
+            background: var(--neon-blue);
+            left: 100px;
+            bottom: 0;
+            box-shadow: 0 0 15px var(--neon-blue);
+            z-index: 10;
+            border-radius: 4px;
+        }
+
+        /* Dash visual state */
+        .dash-active {
+            background: #fff !important;
+            box-shadow: 0 0 40px #fff, 0 0 20px var(--neon-blue) !important;
+            transform: scaleX(2) skewX(-15deg) !important;
+        }
+
+        .obstacle {
+            position: absolute;
+            background: var(--neon-pink);
+            bottom: 0;
+            box-shadow: 0 0 15px var(--neon-pink);
+            border-radius: 4px;
+        }
+
+        /* UI Elements */
+        #hud {
+            position: absolute;
+            top: -45px;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 18px;
+            letter-spacing: 2px;
+        }
+
+        #dash-meter {
+            color: var(--neon-green);
+            transition: color 0.3s;
+        }
+
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 20;
+            text-align: center;
+        }
+
+        h1 {
+            color: var(--neon-blue);
+            text-shadow: 0 0 10px var(--neon-blue);
+            margin: 0 0 10px 0;
+        }
+
+        .controls-hint {
+            font-size: 14px;
+            color: #888;
+            margin-top: 15px;
+        }
+
+        .btn-start {
+            padding: 12px 30px;
+            background: transparent;
+            border: 2px solid var(--neon-blue);
+            color: var(--neon-blue);
+            font-size: 18px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .btn-start:hover {
+            background: var(--neon-blue);
+            color: black;
+            box-shadow: 0 0 20px var(--neon-blue);
+        }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <div id="game-wrapper">
+        <div id="hud">
+            <div>SCORE: <span id="score-val">0</span></div>
+            <div id="dash-meter">DASH: READY</div>
+        </div>
+
+        <div id="game-container" tabindex="0">
+            <div id="player"></div>
+            
+            <div id="overlay">
+                <h1>NEON OVERDRIVE</h1>
+                <button class="btn-start" onclick="startGame()">INITIATE SYSTEM</button>
+                <div class="controls-hint">
+                    SPACE: JUMP (Double Jump supported) | SHIFT: DASH (Invincible)<br>
+                    Hold Jump for height | Click container if keys don't work
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const container = document.getElementById('game-container');
+        const playerEl = document.getElementById('player');
+        const scoreEl = document.getElementById('score-val');
+        const overlay = document.getElementById('overlay');
+        const dashMeter = document.getElementById('dash-meter');
+
+        // Physics Configuration
+        const GRAVITY = 0.55;
+        const JUMP_POWER = -11;
+        const HOLD_LIFT = -0.65;
+        const DASH_SPEED_MULT = 4;
+        
+        // Game Logic State
+        let gameActive = false;
+        let score = 0;
+        let gameSpeed = 6;
+        let frameCount = 0;
+        let obstacles = [];
+        
+        let player = {
+            y: 0,
+            vy: 0,
+            jumps: 0,
+            isDashing: false,
+            dashReady: true,
+            isHoldingJump: false,
+            width: 32,
+            height: 32
+        };
+
+        // --- INPUTS ---
+        window.addEventListener('keydown', (e) => {
+            if (!gameActive) return;
+            if (e.code === 'Space') {
+                e.preventDefault();
+                player.isHoldingJump = true;
+                handleJump();
+            }
+            if (e.key === 'Shift') {
+                e.preventDefault();
+                handleDash();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'Space') player.isHoldingJump = false;
+        });
+
+        // Mouse Fallbacks
+        container.addEventListener('mousedown', (e) => {
+            if (gameActive) {
+                player.isHoldingJump = true;
+                handleJump();
+            }
+        });
+        window.addEventListener('mouseup', () => player.isHoldingJump = false);
+        container.addEventListener('dblclick', (e) => {
+            if (gameActive) handleDash();
+        });
+
+        function handleJump() {
+            if (player.isDashing) return;
+            if (player.jumps < 2) {
+                player.vy = JUMP_POWER;
+                player.jumps++;
+            }
+        }
+
+        function handleDash() {
+            if (!player.dashReady || player.isDashing) return;
+
+            player.isDashing = true;
+            player.dashReady = false;
+            player.vy = 0; // Freeze vertical velocity
+            playerEl.classList.add('dash-active');
+            dashMeter.innerText = "DASH: RECHARGING";
+            dashMeter.style.color = "var(--neon-pink)";
+
+            // Dash Duration
+            setTimeout(() => {
+                player.isDashing = false;
+                playerEl.classList.remove('dash-active');
+            }, 200);
+
+            // Dash Cooldown
+            setTimeout(() => {
+                player.dashReady = true;
+                if (gameActive) {
+                    dashMeter.innerText = "DASH: READY";
+                    dashMeter.style.color = "var(--neon-green)";
+                }
+            }, 1500);
+        }
+
+        function startGame() {
+            gameActive = true;
+            score = 0;
+            gameSpeed = 6.5;
+            player.y = 0;
+            player.vy = 0;
+            player.jumps = 0;
+            frameCount = 0;
+            scoreEl.innerText = "0";
+            
+            // Clean up old objects
+            obstacles.forEach(o => o.el.remove());
+            obstacles = [];
+            
+            overlay.classList.add('hidden');
+            dashMeter.innerText = "DASH: READY";
+            dashMeter.style.color = "var(--neon-green)";
+            
+            container.focus();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function spawnObstacle() {
+            const w = 40 + Math.random() * 90;
+            const h = 30 + Math.random() * 60;
+            const el = document.createElement('div');
+            el.className = 'obstacle';
+            el.style.width = w + 'px';
+            el.style.height = h + 'px';
+            el.style.left = '800px';
+            container.appendChild(el);
+            obstacles.push({ el, x: 800, w, h });
+        }
+
+        function gameLoop() {
+            if (!gameActive) return;
+            frameCount++;
+
+            // 1. Vertical Physics
+            if (!player.isDashing) {
+                // Apply Lift if holding Space during upward velocity
+                if (player.isHoldingJump && player.vy < 0) {
+                    player.vy += HOLD_LIFT;
+                }
+                player.vy += GRAVITY;
+                player.y -= player.vy;
+            }
+
+            // Floor collision
+            if (player.y <= 0) {
+                player.y = 0;
+                player.vy = 0;
+                player.jumps = 0;
+            }
+            
+            // Ceiling cap
+            if (player.y >= 268) {
+                player.y = 268;
+                player.vy = 0;
+            }
+
+            playerEl.style.bottom = player.y + 'px';
+
+            // 2. Spawn logic (faster as time goes on)
+            const spawnRate = Math.max(40, 80 - Math.floor(score / 5));
+            if (frameCount % spawnRate === 0) {
+                spawnObstacle();
+            }
+
+            // 3. Update Obstacles & Collision
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let o = obstacles[i];
+                let effectiveSpeed = player.isDashing ? gameSpeed * DASH_SPEED_MULT : gameSpeed;
+                o.x -= effectiveSpeed;
+                o.el.style.left = o.x + 'px';
+
+                // Box Collision
+                const playerRight = 100 + player.width;
+                const playerLeft = 100;
+                const playerBottom = player.y;
+                
+                const isHit = (
+                    o.x < playerRight && 
+                    (o.x + o.w) > playerLeft && 
+                    playerBottom < o.h
+                );
+
+                if (isHit && !player.isDashing) {
+                    endGame();
+                    return;
+                }
+
+                // Score and Cleanup
+                if (o.x < -150) {
+                    o.el.remove();
+                    obstacles.splice(i, 1);
+                    score++;
+                    scoreEl.innerText = score;
+                    gameSpeed += 0.08; // Difficulty curve
+                }
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function endGame() {
+            gameActive = false;
+            overlay.classList.remove('hidden');
+            overlay.innerHTML = `
+                <h1>SYSTEM FAILURE</h1>
+                <div style="font-size: 24px; color: var(--neon-pink); margin-bottom: 20px;">SCORE: ${score}</div>
+                <button class="btn-start" onclick="startGame()">REBOOT SYSTEM</button>
+                <div class="controls-hint">Watch out for those wide obstacles!</div>
+            `;
+        }
+    </script>
+</body>
+</html>
